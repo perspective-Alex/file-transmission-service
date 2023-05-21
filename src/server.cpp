@@ -1,12 +1,9 @@
-#include <stdio.h>
-#include <unistd.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/time.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
-#include <string.h>
 #include <data.hpp>
 
 #include <iostream>
@@ -22,16 +19,7 @@ using ReceiptConfirmation = std::unordered_set<uint64_t>;
 uint32_t computeCheckSum(const std::vector<Package>& file_packages) {
     uint32_t cs = 0;
     for (const Package& fp : file_packages) {
-        int len;
-        if (fp.seq_number == fp.seq_total-1) {
-            len = 0;
-            while (len < Package::data_size && fp.data[len] != 0) {
-                len++;
-            }
-        } else {
-            len = Package::data_size;
-        }
-        cs = crc32c(cs, fp.data, len);
+        cs = crc32c(cs, fp.data.data(), fp.data.size());
     }
     return cs;
 }
@@ -47,16 +35,7 @@ void dumpFile(const std::vector<Package>& file_packages, uint32_t check_sum) {
     }
     std::ofstream out_f(dir_path + "/" + std::to_string(check_sum) + ".gif", std::ios::out | std::ios::binary);
     for (const Package& fp : file_packages) {
-        int len;
-        if (fp.seq_number == fp.seq_total-1) {
-            len = 0;
-            while (len < Package::data_size && fp.data[len] != 0) {
-                len++;
-            }
-        } else {
-            len = Package::data_size;
-        }
-        out_f.write(reinterpret_cast<const char*>(fp.data), len);
+        out_f.write(reinterpret_cast<const char*>(fp.data.data()), fp.data.size());
     }
     out_f.close();
 }
@@ -94,10 +73,10 @@ int main() {
     PackageCount package_count;
     ReceiptConfirmation package_rc;
 
+    std::vector<byte> package_buf(Package::max_size, '\0');
     logger.log("Waiting for packages...");
-    Package p;
     while (true) {
-        int msg_length = recvfrom(sock_fd,&p,sizeof(p),MSG_WAITALL,
+        int msg_length = recvfrom(sock_fd,package_buf.data(),package_buf.size(),0,
                                   reinterpret_cast<struct sockaddr*>(&client_sockaddr),&client_sockaddr_len);
         if (msg_length == -1) {
             if ((errno != EAGAIN) && (errno != EWOULDBLOCK)) {
@@ -108,8 +87,9 @@ int main() {
                 break;
             }
         }
+        Package p(package_buf,msg_length);
         uint64_t id;
-        memcpy(&id, p.id, 8);
+        memcpy(&id, p.id, sizeof(p.id));
         logger.log("Got a package %lu:%d from %s", id, p.seq_number, inet_ntoa(client_sockaddr.sin_addr));
         if (package_storage[id].empty()) {
             package_storage.at(id).resize(p.seq_total);
@@ -138,7 +118,8 @@ int main() {
         } else {
             reply_package = Package(p.seq_number, package_count.at(id), id, nullptr);
         }
-        if (sendto(sock_fd,&reply_package,sizeof(reply_package),0,
+        std::vector<byte> send_package_buf = reply_package.vectorize();
+        if (sendto(sock_fd,send_package_buf.data(),send_package_buf.size(),0,
                    reinterpret_cast<const struct sockaddr*>(&client_sockaddr),client_sockaddr_len) == -1) {
             // TODO: add repeated reply in case of failure
             logger.logErr("can't reply to client %s", inet_ntoa(client_sockaddr.sin_addr));

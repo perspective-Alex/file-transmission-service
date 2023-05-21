@@ -17,15 +17,15 @@ extern Logger logger;
 
 using DataSetCS = std::unordered_map<uint64_t, uint32_t>;
 using PackageStorage = std::unordered_map<uint64_t, std::vector<Package>>;
-using PackageStorageIndex = std::pair<uint64_t, size_t>;
+using PackageStorageIndex = std::pair<uint64_t, uint32_t>;
 using ReceiptConfirmation = std::unordered_map<uint64_t, std::vector<char>>;
 
 void readFile(std::ifstream& in_f, std::deque<Package>& deq, uint64_t id) {
     in_f.seekg(0, std::ios::end);
     int fsize = in_f.tellg();
     logger.log("file size = %d bytes", fsize);
-    int req_p_count = fsize / Package::data_size;
-    if (fsize % Package::data_size) {
+    int req_p_count = fsize / (Package::max_size - Package::header_size);
+    if (fsize % (Package::max_size - Package::header_size)) {
         req_p_count++;
     }
     in_f.seekg(0, std::ios::beg);
@@ -71,19 +71,10 @@ void shufflePackageQueue(std::deque<Package>& deq) {
 
 DataSetCS computeCheckSum(std::deque<Package>& deq) {
     DataSetCS id2check_sum;
-    int len;
     for (Package& p : deq) {
-        if (p.seq_number == p.seq_total-1) {
-            len = 0;
-            while (len < Package::data_size && p.data[len] != 0) {
-                len++;
-            }
-        } else {
-            len = Package::data_size;
-        }
         uint64_t id;
-        memcpy(&id, p.id, 8);
-        id2check_sum[id] = crc32c(id2check_sum[id], p.data, len);
+        memcpy(&id, p.id, sizeof(p.id));
+        id2check_sum[id] = crc32c(id2check_sum[id], p.data.data(), p.data.size());
     }
     return id2check_sum;
 }
@@ -95,9 +86,7 @@ int main(int argc, char** argv) {
     }
     logger.set("CLIENT");
     const char* server_ip = "127.0.0.1";
-    //const char* server_ip = "37.252.0.5";
     const short server_port = 1234;
-    const int buf_length = 1000;
     const int package_rate = 100;
     const timeval recvfrom_timeout = {1,0};
     const timeval rtt_time_thres = {5,0};
@@ -140,7 +129,8 @@ int main(int argc, char** argv) {
     auto getDuration = [](timeval& t1, timeval& t2) -> size_t {return (t2.tv_sec - t1.tv_sec)*1e6 + (int)t2.tv_usec - (int)t1.tv_usec; };
     size_t dur;
     int i;
-    std::deque<std::pair<PackageStorageIndex , timeval>> v_package_deq;
+    std::deque<std::pair<PackageStorageIndex,timeval>> v_package_deq;
+    std::vector<byte> package_buf(Package::max_size,'\0');
     while (success_file_count < total_file_count) {
         gettimeofday(&send_start_t, NULL);
         gettimeofday(&cur_t, NULL);
@@ -148,24 +138,26 @@ int main(int argc, char** argv) {
         i = 0;
         while (i < package_rate && dur < 1*1e6 && !package_deq.empty()) {
             Package& p = package_deq.front();
-            if (sendto(sock_fd,&p,sizeof(p),0,
+            std::vector<byte> p_vec = p.vectorize();
+            if (sendto(sock_fd,p_vec.data(),p_vec.size(),0,
                        reinterpret_cast<const struct sockaddr*>(&serv_sockaddr),sizeof(serv_sockaddr)) == -1) {
                 logger.logErr("server is unavailable, terminating...");
                 perror(nullptr);
                 return -1;
             }
-            if (p.seq_number == p.seq_total - 1) {
+            /*
+            if (p.seq_number == 0) {
                 std::ostringstream ss;
                 ss << "{ ";
-                for (int i=0; i<Package::data_size; i++) {
+                for (int i=0; i<p.data.size(); i++) {
                     ss << std::to_string((int)p.data[i]) << " ";
                 }
                 ss << "}";
-                logger.log("Logging last package data: %s", ss.str().c_str());
-            }
+                logger.log("Logging package data: %s", ss.str().c_str());
+            }*/
             i++;
             uint64_t id;
-            memcpy(&id, p.id, 8);
+            memcpy(&id, p.id, sizeof(p.id));
             logger.log("sent package %lu:%d", id, p.seq_number);
             gettimeofday(&cur_t, NULL);
             v_package_deq.emplace_back(std::make_pair(id, p.seq_number),cur_t);
@@ -174,28 +166,27 @@ int main(int argc, char** argv) {
         }
         logger.log("sent %d packages recently", i);
 
-        Package p;
         gettimeofday(&recv_start_t, NULL);
         gettimeofday(&cur_t, NULL);
         dur = getDuration(recv_start_t, cur_t);
         while (i > 0 && dur < 1*1e6) {
-            int msg_length = recvfrom(sock_fd,&p,sizeof(p),MSG_WAITALL,
-                                      reinterpret_cast<struct sockaddr*>(&serv_sockaddr),&server_sockaddr_len);
+            int msg_length = recvfrom(sock_fd, package_buf.data(), package_buf.size(), 0,
+                                      reinterpret_cast<struct sockaddr*>(&serv_sockaddr), &server_sockaddr_len);
             if (msg_length == -1) {
                 if ((errno != EAGAIN) && (errno != EWOULDBLOCK)) {
                     logger.logErr("recvfrom error occurred");
                     perror(nullptr);
                 }
             } else {
-                //assert(sizeof(p) == msg_length);
+                Package p(package_buf, msg_length);
                 uint64_t id;
-                memcpy(&id, p.id, 8);
+                memcpy(&id, p.id, sizeof(p.id));
                 logger.log("received package %lu:%d", id, p.seq_number);
                 package_rc.at(id).at(p.seq_number) = 1;
                 if (p.seq_total == package_rc.at(id).size()) {
                     logger.log("got confirmation for file id=%lu", id);
                     uint32_t server_checksum;
-                    memcpy(&server_checksum, p.data, 4);
+                    memcpy(&server_checksum, p.data.data(), sizeof(server_checksum));
                     if (server_checksum == cs.at(id)) {
                         logger.log("checksums match, (server %u vs client %u)", server_checksum, cs.at(id));
                         success_file_count++;
