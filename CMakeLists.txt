@@ -16,6 +16,7 @@ set(EXEC_NAME server)
 set(INCLUDE_DIRS include)
 set(SOURCES
         src/${EXEC_NAME}.cpp
+        src/test.cpp
         src/data.cpp)
 add_executable(${EXEC_NAME} ${SOURCES})
 target_include_directories(${EXEC_NAME} PUBLIC ${INCLUDE_DIRS})
