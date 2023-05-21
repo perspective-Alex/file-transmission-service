@@ -117,8 +117,11 @@ int main(int argc, char** argv) {
     shufflePackageQueue(package_deq);
     {
         std::ostringstream css;
+        uint64_t id;
+        uint32_t v;
         css << "{ ";
-        for (auto [id,v]: cs) {
+        for (auto pair : cs) {
+            std::tie(id,v) = pair;
             css << id << "," << v << " ";
         }
         css << "}";
@@ -195,9 +198,14 @@ int main(int argc, char** argv) {
             dur = getDuration(recv_start_t, cur_t);
         }
         gettimeofday(&cur_t, NULL);
+        timeval send_time;
+        PackageStorageIndex package_storage_index;
+        uint64_t id;
+        uint32_t seq_number;
         size_t cur_pdeq_sz = package_deq.size();
         while (!v_package_deq.empty()) {
-            auto& [package_storage_index, send_time] = v_package_deq.front();
+            auto& elem = v_package_deq.front();
+            std::tie(package_storage_index, send_time) = elem;
             if (getDuration(send_time, cur_t) < (rtt_time_thres.tv_sec*1e6 + rtt_time_thres.tv_usec)) {
                 break;
             }
