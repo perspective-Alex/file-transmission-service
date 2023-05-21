@@ -4,7 +4,9 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+
 #include <data.hpp>
+#include <test.hpp>
 
 #include <iostream>
 #include <unordered_map>
@@ -43,8 +45,8 @@ void dumpFile(const std::vector<Package>& file_packages, uint32_t check_sum) {
 int main() {
     logger.set("SERVER");
     const short port = 1234;
-    const char* ip = "127.0.0.1";
-    const timeval wait_timeout = {15,0};
+    //const char* ip = "127.0.0.1";
+    const timeval wait_timeout = {1500,0};
 
     int sock_fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     if (sock_fd == -1) {
@@ -55,15 +57,15 @@ int main() {
     struct sockaddr_in serv_sockaddr, client_sockaddr;
 
     serv_sockaddr.sin_family = AF_INET;
-    //serv_sockaddr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    if (!inet_aton(ip, &serv_sockaddr.sin_addr)) {
-        logger.logErr("inet_aton call failed");
-        return -1;
-    }
+    serv_sockaddr.sin_addr.s_addr = htonl(INADDR_ANY);
+    //if (!inet_aton(ip, &serv_sockaddr.sin_addr)) {
+    //    logger.logErr("inet_aton call failed");
+    //    return -1;
+    //}
 
     serv_sockaddr.sin_port = htons(port);
     if (bind(sock_fd,reinterpret_cast<const struct sockaddr*>(&serv_sockaddr),sizeof(serv_sockaddr)) == -1) {
-        logger.logErr("can't bind socket fd to specified address %s:%d", ip, port);
+        logger.logErr("can't bind socket fd to specified address");
         perror(nullptr);
         return -1;
     }
@@ -99,10 +101,12 @@ int main() {
         if (prc_it != package_rc.end()) {
             logger.log("Restarting receipt of file %lu", id);
             std::fill(package_storage.at(id).begin(), package_storage.at(id).end(), Package());
-            package_count.at(id) = 0;
+            package_storage.at(id).at(p.seq_number) = p;
+            package_count.at(id) = 1;
             package_rc.erase(prc_it);
         } else {
             if (package_storage.at(id).at(p.seq_number).empty()) {
+                //spoilOnePackage(p);
                 package_storage.at(id).at(p.seq_number) = p;
                 package_count.at(id)++;
             }

@@ -86,6 +86,7 @@ int main(int argc, char** argv) {
     }
     logger.set("CLIENT");
     const char* server_ip = "127.0.0.1";
+    //const char* server_ip = "192.168.0.101";
     const short server_port = 1234;
     const int package_rate = 100;
     const timeval recvfrom_timeout = {1,0};
@@ -145,16 +146,6 @@ int main(int argc, char** argv) {
                 perror(nullptr);
                 return -1;
             }
-            /*
-            if (p.seq_number == 0) {
-                std::ostringstream ss;
-                ss << "{ ";
-                for (int i=0; i<p.data.size(); i++) {
-                    ss << std::to_string((int)p.data[i]) << " ";
-                }
-                ss << "}";
-                logger.log("Logging package data: %s", ss.str().c_str());
-            }*/
             i++;
             uint64_t id;
             memcpy(&id, p.id, sizeof(p.id));
@@ -194,6 +185,7 @@ int main(int argc, char** argv) {
                         logger.log("checksums don't match, (server %u vs client %u), resending full file", server_checksum, cs.at(id));
                         package_deq.insert(package_deq.end(), package_storage.at(id).begin(),
                                            package_storage.at(id).end());
+                        std::fill(package_rc.at(id).begin(), package_rc.at(id).end(), 0);
                         shufflePackageQueue(package_deq);
                     }
                 }
@@ -209,8 +201,10 @@ int main(int argc, char** argv) {
             if (getDuration(send_time, cur_t) < (rtt_time_thres.tv_sec*1e6 + rtt_time_thres.tv_usec)) {
                 break;
             }
-            if (package_rc.at(package_storage_index.first).at(package_storage_index.second) == 0) {
-                package_deq.insert(package_deq.end(), package_storage.at(package_storage_index.first).at(package_storage_index.second));
+            std::tie(id,seq_number) = package_storage_index;
+            if (package_rc.at(id).at(seq_number) == 0) {
+                logger.log("RTT timeout reached, adding package %lu:%d to send queue again", id, seq_number);
+                package_deq.insert(package_deq.end(), package_storage.at(id).at(seq_number));
             }
             v_package_deq.pop_front();
         }
