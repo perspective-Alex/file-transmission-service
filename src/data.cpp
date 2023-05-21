@@ -24,7 +24,7 @@ Package::Package(uint32_t seq_number_, uint32_t seq_total_, uint64_t id_, uint32
 }
 
 Package::Package(const std::vector<byte>& src, int len) {
-    size_t offset = 0;
+    int offset = 0;
     memcpy(&seq_number, &src[offset], sizeof(seq_number));
     offset += sizeof(seq_number);
     memcpy(&seq_total, &src[offset], sizeof(seq_total));

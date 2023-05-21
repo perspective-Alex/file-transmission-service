@@ -46,7 +46,7 @@ int main() {
     logger.set("SERVER");
     const short port = 1234;
     //const char* ip = "127.0.0.1";
-    const timeval wait_timeout = {1500,0};
+    const timeval wait_timeout = {15,0};
 
     int sock_fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     if (sock_fd == -1) {
@@ -125,7 +125,6 @@ int main() {
         std::vector<byte> send_package_buf = reply_package.vectorize();
         if (sendto(sock_fd,send_package_buf.data(),send_package_buf.size(),0,
                    reinterpret_cast<const struct sockaddr*>(&client_sockaddr),client_sockaddr_len) == -1) {
-            // TODO: add repeated reply in case of failure
             logger.logErr("can't reply to client %s", inet_ntoa(client_sockaddr.sin_addr));
             perror(nullptr);
         }

@@ -6,6 +6,7 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <string.h>
+#include <dirent.h>
 
 #include <data.hpp>
 
@@ -38,25 +39,32 @@ void readFile(std::ifstream& in_f, std::deque<Package>& deq, uint64_t id) {
 
 std::deque<Package> readFiles(std::string dir_path, ReceiptConfirmation& rc, PackageStorage& ps) {
     int i = 0;
+    DIR* dir = opendir(dir_path.c_str());
+    dirent* entry;
     std::deque<Package> res;
-    auto next = [&i](std::string dir_path) { return dir_path + "/" + std::to_string(i) + ".gif"; };
-    std::string path = next(dir_path);
+    if (!dir) {
+        logger.logErr("can't open specified file directory");
+        perror(nullptr);
+        return res;
+    }
     std::ifstream in_f;
-    in_f.open(path, std::ios::in | std::ios::binary);
     int sz;
-    while (in_f.good()) {
+    while ((entry = readdir(dir))) {
+        if (entry->d_type != DT_REG) {
+            continue;
+        }
+        logger.log("file %s", entry->d_name);
+        in_f.open(dir_path + "/" + entry->d_name, std::ios::in | std::ios::binary);
         sz = res.size();
         uint64_t id = i;
         readFile(in_f, res, id);
         in_f.close();
         rc[id].resize(res.size() - sz, 0);
         ps[id].resize(res.size() - sz);
-        for (int j = 0; j<res.size()-sz; j++) {
+        for (int j = 0; j<(int)res.size()-sz; j++) {
             ps[id][j] = res[sz+j];
         }
         i++;
-        path = next(dir_path);
-        in_f.open(path, std::ios::in | std::ios::binary);
     }
     in_f.close();
     logger.log("read %d files", i);
@@ -88,9 +96,13 @@ int main(int argc, char** argv) {
     const char* server_ip = "127.0.0.1";
     //const char* server_ip = "192.168.0.101";
     const short server_port = 1234;
-    const int package_rate = 100;
+    const int byte_rate = 128 * 1024;
+    const int package_rate = byte_rate / Package::max_size;
     const timeval recvfrom_timeout = {1,0};
     const timeval rtt_time_thres = {5,0};
+    auto timeval2usec = [](const timeval& t) -> long long { return t.tv_sec*1e6 + t.tv_usec; };
+    auto getDuration = [&timeval2usec](const timeval& t1, const timeval& t2) -> long long {return timeval2usec(t2) - timeval2usec(t1); };
+    const long long recvfrom_timeout_us = timeval2usec(recvfrom_timeout);
 
     int sock_fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     if (sock_fd == -1) {
@@ -127,11 +139,12 @@ int main(int argc, char** argv) {
         css << "}";
         logger.log("Checksums: %s", css.str().c_str());
     }
+    logger.log("Bit rate set to %d Bps -> Package rate = %d pps", byte_rate, package_rate);
 
     size_t total_file_count = cs.size(), success_file_count = 0;
     timeval send_start_t{}, recv_start_t{}, cur_t{};
-    auto getDuration = [](timeval& t1, timeval& t2) -> size_t {return (t2.tv_sec - t1.tv_sec)*1e6 + (int)t2.tv_usec - (int)t1.tv_usec; };
-    size_t dur;
+
+    long long dur;
     int i;
     std::deque<std::pair<PackageStorageIndex,timeval>> v_package_deq;
     std::vector<byte> package_buf(Package::max_size,'\0');
@@ -163,7 +176,7 @@ int main(int argc, char** argv) {
         gettimeofday(&recv_start_t, NULL);
         gettimeofday(&cur_t, NULL);
         dur = getDuration(recv_start_t, cur_t);
-        while (i > 0 && dur < 1*1e6) {
+        while (dur < recvfrom_timeout_us) {
             int msg_length = recvfrom(sock_fd, package_buf.data(), package_buf.size(), 0,
                                       reinterpret_cast<struct sockaddr*>(&serv_sockaddr), &server_sockaddr_len);
             if (msg_length == -1) {
@@ -193,7 +206,6 @@ int main(int argc, char** argv) {
                     }
                 }
             }
-            i--;
             gettimeofday(&cur_t, NULL);
             dur = getDuration(recv_start_t, cur_t);
         }
@@ -206,7 +218,7 @@ int main(int argc, char** argv) {
         while (!v_package_deq.empty()) {
             auto& elem = v_package_deq.front();
             std::tie(package_storage_index, send_time) = elem;
-            if (getDuration(send_time, cur_t) < (rtt_time_thres.tv_sec*1e6 + rtt_time_thres.tv_usec)) {
+            if (getDuration(send_time, cur_t) < timeval2usec(rtt_time_thres)) {
                 break;
             }
             std::tie(id,seq_number) = package_storage_index;
@@ -222,7 +234,7 @@ int main(int argc, char** argv) {
         }
 
         gettimeofday(&cur_t, NULL);
-        size_t time_passed = getDuration(send_start_t, cur_t);
+        long long time_passed = getDuration(send_start_t, cur_t);
         long long wait_time = 1e6 - time_passed;
         if (wait_time > 0) {
             usleep(wait_time);
