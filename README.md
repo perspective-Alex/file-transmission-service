@@ -40,3 +40,7 @@ make run_client
 ```shell
 make run
 ```
+
+Transmission is demonstrated through log to `stdout`.
+
+`server` also saves obtained data to `${BUILD_DIR}/data`.
