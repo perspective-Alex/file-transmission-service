@@ -240,6 +240,7 @@ int main(int argc, char** argv) {
             usleep(wait_time);
         }
     }
+    sendto(sock_fd, nullptr, 0, 0, reinterpret_cast<const struct sockaddr*>(&serv_sockaddr),sizeof(serv_sockaddr)); // aka model the `shutdown(sock_fd, SHUT_WR)`;
     close(sock_fd);
     return 0;
 }
