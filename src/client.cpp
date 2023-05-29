@@ -96,7 +96,7 @@ int main(int argc, char** argv) {
     const char* server_ip = "127.0.0.1";
     //const char* server_ip = "192.168.0.101";
     const short server_port = 1234;
-    const int byte_rate = 128 * 1024;
+    const int byte_rate = 1 * 128 * 1024;
     const int package_rate = byte_rate / Package::max_size;
     const timeval recvfrom_timeout = {1,0};
     const timeval rtt_time_thres = {5,0};
@@ -155,20 +155,26 @@ int main(int argc, char** argv) {
         i = 0;
         while (i < package_rate && dur < 1*1e6 && !package_deq.empty()) {
             Package& p = package_deq.front();
-            std::vector<byte> p_vec = p.vectorize();
-            if (sendto(sock_fd,p_vec.data(),p_vec.size(),0,
-                       reinterpret_cast<const struct sockaddr*>(&serv_sockaddr),sizeof(serv_sockaddr)) == -1) {
-                logger.logErr("server is unavailable, terminating...");
-                perror(nullptr);
-                return -1;
-            }
-            i++;
             uint64_t id;
             memcpy(&id, p.id, sizeof(p.id));
-            logger.log("sent package %lu:%d", id, p.seq_number);
-            gettimeofday(&cur_t, NULL);
-            v_package_deq.emplace_back(std::make_pair(id, p.seq_number),cur_t);
+            if (package_rc.at(id).at(p.seq_number) == 0) {
+                // for "resend scenario": last check if there is still no confirmation from server
+                std::vector<byte> p_vec = p.vectorize();
+                if (sendto(sock_fd,p_vec.data(),p_vec.size(),0,
+                           reinterpret_cast<const struct sockaddr*>(&serv_sockaddr),sizeof(serv_sockaddr)) == -1) {
+                    logger.logErr("server is unavailable, terminating...");
+                    perror(nullptr);
+                    return -1;
+                }
+                logger.log("sent package %lu:%d", id, p.seq_number);
+                i++;
+                gettimeofday(&cur_t, NULL);
+                v_package_deq.emplace_back(std::make_pair(id, p.seq_number),cur_t);
+            } else {
+                logger.log("got confirmation for package %lu:%d (after timeout), no need to resend");
+            }
             package_deq.pop_front();
+            gettimeofday(&cur_t, NULL);
             dur = getDuration(send_start_t, cur_t);
         }
         logger.log("sent %d packages recently", i);
@@ -240,7 +246,7 @@ int main(int argc, char** argv) {
             usleep(wait_time);
         }
     }
-    sendto(sock_fd, nullptr, 0, 0, reinterpret_cast<const struct sockaddr*>(&serv_sockaddr),sizeof(serv_sockaddr)); // aka model the `shutdown(sock_fd, SHUT_WR)`;
+    sendto(sock_fd, nullptr, 0, 0, reinterpret_cast<const struct sockaddr*>(&serv_sockaddr),sizeof(serv_sockaddr)); // i.e. model the `shutdown(sock_fd, SHUT_WR)`;
     close(sock_fd);
     return 0;
 }
