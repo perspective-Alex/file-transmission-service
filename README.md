@@ -4,6 +4,10 @@ Client sends data to server using UDP with additional checksum control (and rese
 
 Backbone - UNIX sockets
 
+##### Demo
+
+https://github.com/perspective-Alex/file-transmission-service/assets/26414510/8fe82a20-da71-4ddb-9464-388a52cdb670
+
 ##### Requirements
 - `gcc (g++)` - version >= 4.9
 - `make`
@@ -44,3 +48,4 @@ make run
 Transmission is demonstrated through log to `stdout`.
 
 `server` also saves obtained data to `${BUILD_DIR}/data`.
+
