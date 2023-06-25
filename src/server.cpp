@@ -80,12 +80,15 @@ int main() {
     while (true) {
         int msg_length = recvfrom(sock_fd,package_buf.data(),package_buf.size(),0,
                                   reinterpret_cast<struct sockaddr*>(&client_sockaddr),&client_sockaddr_len);
-        if (msg_length == -1) {
+        if (msg_length == 0 && package_buf.size() != 0) {
+            logger.log("client ended the communication, finishing...");
+            break;
+        } else if (msg_length == -1) {
             if ((errno != EAGAIN) && (errno != EWOULDBLOCK)) {
                 logger.logErr("recvfrom error occurred");
                 perror(nullptr);
             } else {
-                logger.log("communication is over, finishing...");
+                logger.logErr("timeout reached, finishing communication...");
                 break;
             }
         }
